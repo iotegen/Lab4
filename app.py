@@ -1,37 +1,53 @@
+# app.py (fixed)
 from flask import Flask, request, jsonify
 import json
-import traceback
-from itsdangerous import URLSafeSerializer
+import logging
+import os
 
 app = Flask(__name__)
 
-# Загружаем локальный конфиг (в demo он содержит "секреты", но он в .gitignore)
-with open("config/config.json", "r", encoding="utf-8") as f:
-    config = json.load(f)
+# load example config (no secrets)
+with open("config/config.example.json", "r", encoding="utf-8") as f:
+    cfg = json.load(f)
+
+# use env vars for secrets (local: set these in your shell; never commit .env)
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "replace_with_secure_password")
+
+# logger
+logger = logging.getLogger("app")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+logger.addHandler(handler)
+
+def handle_error(err):
+    logger.exception(err)
+    return jsonify({"message": "Internal server error"}), 500
 
 @app.route("/debug")
 def debug():
     try:
-        raise Exception(f"Something went wrong: DB host = {config['db']['host']}")
+        # demo endpoint — but we don't reveal internals
+        raise Exception("Intentional demo error")
     except Exception as e:
-        return jsonify({"message": str(e), "stack": traceback.format_exc()}), 500
+        return handle_error(e)
 
 @app.route("/login", methods=["POST"])
 def login():
     data = request.get_json() or {}
-    if data.get("username") == "admin" and data.get("password") == "AdminPass123!":
-        return jsonify({"ok": True, "token": "hardcoded-python-token"})
+    if data.get("username") == ADMIN_USERNAME and data.get("password") == ADMIN_PASSWORD:
+        # TODO: generate real JWT in production
+        return jsonify({"ok": True, "token": "TODO:generate-jwt"}), 200
     return jsonify({"ok": False}), 401
 
 @app.route("/deserialize", methods=["POST"])
 def deserialize():
-    data = request.get_json() or {}
-    s = URLSafeSerializer("hardcoded-secret-key")
-    try:
-        obj = s.loads(data.get("data",""))
-        return jsonify({"ok": True, "obj": obj})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
+    # safe handling: accept JSON and validate expected structure (no unserialize)
+    payload = request.get_json() or {}
+    name = payload.get("name")
+    if not name or not isinstance(name, str):
+        return jsonify({"ok": False, "error": "Invalid payload: name required"}), 400
+    return jsonify({"ok": True, "data": {"name": name}}), 200
 
 if __name__ == "__main__":
-    app.run(port=5000, debug=True)
+    app.run(port=5000, debug=(os.getenv("FLASK_ENV") != "production"))
